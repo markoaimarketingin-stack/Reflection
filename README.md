@@ -136,7 +136,7 @@ Returns stored pattern findings ordered by impact.
 
 Returns planning recommendations built from top insights, top patterns, signal weights, and similar historical campaigns.
 
-## Local setup
+## Local setup:
 
 ### 1. Install dependencies
 
