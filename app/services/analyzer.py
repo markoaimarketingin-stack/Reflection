@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from app.core.config import Settings
 from app.models.schemas import (
@@ -14,21 +15,22 @@ from app.services.feedback import FeedbackLoopEngine
 from app.services.insight_service import InsightService
 from app.services.pattern_detector import PatternDetectionEngine
 from app.services.scoring import ScoringService
-from app.storage.sqlite import SQLiteRepository
-from app.storage.vector_store import MemoryDocument, SemanticMemoryStore
+from app.storage.supabase_repository import SupabaseRepository  # ✅ was SQLiteRepository
+from app.storage.vector_store import SemanticMemoryStore
 from app.utils.io import write_json
 
 
 @dataclass
 class ReflectionLearningEngine:
     settings: Settings
-    repository: SQLiteRepository
+    repository: SupabaseRepository  # ✅ was SQLiteRepository
     vector_store: SemanticMemoryStore
     comparator: PerformanceComparator
     pattern_detector: PatternDetectionEngine
     insight_service: InsightService
     feedback_engine: FeedbackLoopEngine
     scoring_service: ScoringService
+    supabase: Any
 
     def analyze_campaign(self, payload: CampaignPerformanceInput) -> AnalyzeCampaignResponse:
         history = self.repository.fetch_campaign_history()
@@ -39,7 +41,11 @@ class ReflectionLearningEngine:
         )
 
         summary_text = self._build_campaign_summary(payload, comparison, pattern_report)
-        similar_campaigns = self.vector_store.query_similar(summary_text, n_results=3)
+        similar_campaigns = self.vector_store.query_similar(
+            self.supabase,
+            summary_text,
+            n_results=3,
+        )
         insights = self.insight_service.generate_insights(pattern_report, comparison, similar_campaigns)
 
         self.repository.save_campaign(
@@ -51,21 +57,26 @@ class ReflectionLearningEngine:
         self.repository.save_pattern_report(payload.campaign_id, pattern_report)
         self.repository.save_insights(payload.campaign_id, insights)
 
+        # ✅ Fixed: pass a plain dict matching what upsert_documents expects
         vector_saved = self.vector_store.upsert_documents(
+            self.supabase,
             [
-                MemoryDocument(
-                    document_id=f"campaign::{payload.campaign_id}",
-                    summary=summary_text,
-                    metadata={
+                {
+                    "source_table": "campaigns",
+                    "source_id": payload.campaign_id,
+                    "agent_id": self.settings.agent_id,
+                    "summary": summary_text,
+                    "metadata": {
                         "campaign_id": payload.campaign_id,
                         "platform": payload.platform,
                         "objective": payload.objective,
                         "timestamp": payload.timestamp.isoformat(),
                         "auto_tags": pattern_report.auto_tags,
                     },
-                )
-            ]
+                }
+            ],
         )
+
         weights = self.feedback_engine.update_system_learnings(payload, comparison, pattern_report)
         output_path = self._persist_outputs(payload.campaign_id, comparison, pattern_report, insights, weights)
 
@@ -76,7 +87,7 @@ class ReflectionLearningEngine:
             weights=weights,
             similar_campaigns=similar_campaigns,
             stored_memory=StorageConfirmation(
-                sqlite_saved=True,
+                sqlite_saved=False,   # ✅ was True — no SQLite anymore
                 vector_saved=vector_saved,
                 output_path=str(output_path),
             ),
@@ -101,7 +112,11 @@ class ReflectionLearningEngine:
         if platform or objective:
             query_text = f"{query_text} platform={platform or 'any'} objective={objective or 'any'}"
 
-        similar_campaigns = self.vector_store.query_similar(query_text, n_results=3)
+        similar_campaigns = self.vector_store.query_similar(
+            self.supabase,
+            query_text,
+            n_results=3,
+        )
         return self.insight_service.generate_recommendations(
             top_insights,
             top_patterns,

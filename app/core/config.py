@@ -19,7 +19,10 @@ class Settings:
     embedding_model: str
     openai_api_key: str | None
     insights_limit: int
-
+    agent_id: str
+    supabase_url: str
+    supabase_key: str
+    
     @classmethod
     def load(cls) -> "Settings":
         base_dir = Path(__file__).resolve().parents[2]
@@ -31,6 +34,8 @@ class Settings:
             "data/vector_store.json",
         )
         weights_path = base_dir / os.getenv("MARKO_WEIGHTS_PATH", "data/weights.json")
+
+        agent_id = os.getenv("agent_id", "default_agent")
 
         return cls(
             app_name="Reflection & Learning Engine",
@@ -45,6 +50,9 @@ class Settings:
             embedding_model=os.getenv("MARKO_EMBEDDING_MODEL", "text-embedding-3-small"),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             insights_limit=int(os.getenv("MARKO_INSIGHTS_LIMIT", "10")),
+            agent_id=agent_id,
+            supabase_url=os.getenv("SUPABASE_URL"),
+            supabase_key=os.getenv("SUPABASE_KEY"),
         )
 
     def ensure_directories(self) -> None:
