@@ -1,0 +1,25 @@
+.aider*
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build artifacts
+*.egg-info/
+
+# Env
+.env
+venv/
+
+# OS / editor junk
+*.identifier
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# Project generated
+output/
+data/
