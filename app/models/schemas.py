@@ -155,7 +155,7 @@ class InsightRecord(BaseModel):
 
 
 class PatternRecord(BaseModel):
-    id: int
+    id: UUID
     campaign_id: str
     category: str
     signal_key: str
