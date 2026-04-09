@@ -47,7 +47,6 @@ cyseq==0.1.2
 debian_inspector==31.1.1
 defusedxml==0.7.1
 distro==1.9.0
-distro-info==1.7+build1
 Django==6.0.3
 django-crispy-forms==2.6
 django-debug-toolbar==6.2.0
