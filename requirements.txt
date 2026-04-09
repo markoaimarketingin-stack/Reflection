@@ -33,7 +33,6 @@ chardet==5.2.0
 charset-normalizer==3.4.6
 clamd==1.0.2
 click==8.3.1
-cloud-init==25.1.4
 colorama==0.4.6
 command-not-found==0.3
 commoncode==32.4.2
