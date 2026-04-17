@@ -2,15 +2,20 @@
 // TODO: add charts/graphs for trend visualization
 // TODO: add natural language search over stored insights
 
-import { useState, useEffect } from 'react'
-import { Card, SectionTitle, Tag, ImpactBar, SkeletonBlock, EmptyState, ErrorBox } from '../components/ui'
+import { useEffect, useState } from 'react'
+import { ArrowLeft, Lightbulb, RefreshCw } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Card, Tag, ImpactBar, SkeletonBlock, EmptyState, ErrorBox } from '../components/ui'
 import { getInsights, getPatterns, getRecommendations } from '../api/api'
+import { loadViewState, persistViewState } from '../lib/viewState'
 
 const TABS = [
-  { id: 'insights',        label: '🧠 Insights' },
-  { id: 'patterns',        label: '🔍 Patterns' },
-  { id: 'recommendations', label: '💡 Recommendations' },
+  { id: 'insights', label: 'Insights' },
+  { id: 'patterns', label: 'Patterns' },
+  { id: 'recommendations', label: 'Recommendations' },
 ]
+
+const HISTORY_STATE_KEY = 'marko-history-page-state'
 
 function InsightRow({ record }) {
   const kindColor = { key_learning: 'blue', recommendation: 'green', anomaly: 'amber' }
@@ -18,7 +23,7 @@ function InsightRow({ record }) {
     <div style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <span style={{ fontSize: 14, flexShrink: 0 }}>
-          {record.kind === 'key_learning' ? '✦' : record.kind === 'anomaly' ? '⚠' : '→'}
+          {record.kind === 'key_learning' ? '•' : record.kind === 'anomaly' ? '!' : '→'}
         </span>
         <div style={{ flex: 1 }}>
           <p style={{ margin: '0 0 6px', fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5 }}>
@@ -103,12 +108,13 @@ function RecsContent({ recs }) {
 }
 
 export default function HistoryPage() {
-  const [tab, setTab]         = useState('insights')
+  const navigate = useNavigate()
+  const [tab, setTab] = useState(() => loadViewState(HISTORY_STATE_KEY)?.tab ?? 'insights')
   const [insights, setInsights] = useState([])
   const [patterns, setPatterns] = useState([])
-  const [recs, setRecs]         = useState(null)
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState(null)
+  const [recs, setRecs] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
   async function load() {
     setLoading(true)
@@ -122,7 +128,6 @@ export default function HistoryPage() {
       if (i.status === 'fulfilled') setInsights(i.value)
       if (p.status === 'fulfilled') setPatterns(p.value)
       if (r.status === 'fulfilled') setRecs(r.value)
-      // surface first error if all failed
       if (i.status === 'rejected' && p.status === 'rejected' && r.status === 'rejected') {
         setError(i.reason?.message || 'Failed to load data')
       }
@@ -135,28 +140,37 @@ export default function HistoryPage() {
 
   useEffect(() => { load() }, [])
 
-  const counts = { insights: insights.length, patterns: patterns.length, recommendations: recs?.recommendations?.length ?? 0 }
+  useEffect(() => {
+    persistViewState(HISTORY_STATE_KEY, { tab })
+  }, [tab])
+
+  const counts = {
+    insights: insights.length,
+    patterns: patterns.length,
+    recommendations: recs?.recommendations?.length ?? 0,
+  }
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: 24 }}>
-      {/* Header */}
-      <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 4px' }}>
-            History &amp; Memory
-          </h1>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
-            Stored insights, patterns, and signals from all analyzed campaigns
-          </p>
+      <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <button className="btn-ghost" onClick={() => navigate(-1)} type="button"><ArrowLeft size={14} /> Back</button>
+          <div>
+            <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 4px' }}>
+              History &amp; Memory
+            </h1>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+              Stored insights, patterns, and signals from all analyzed campaigns
+            </p>
+          </div>
         </div>
         <button className="btn-ghost" onClick={load} disabled={loading}>
-          {loading ? '...' : '↻ Refresh'}
+          {loading ? '...' : <><RefreshCw size={14} /> Refresh</>}
         </button>
       </div>
 
       {error && <ErrorBox message={error} onDismiss={() => setError(null)} />}
 
-      {/* Tab bar */}
       <div style={{
         display: 'flex', gap: 4, background: 'var(--surface)',
         border: '1px solid var(--border)', borderRadius: 10, padding: 4, marginBottom: 16,
@@ -186,7 +200,6 @@ export default function HistoryPage() {
         ))}
       </div>
 
-      {/* Content */}
       <Card>
         {loading ? (
           <>
