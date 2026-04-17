@@ -1,16 +1,15 @@
-import { useState } from 'react'
-import { Spinner } from './ui'
+import { useEffect, useMemo, useState } from 'react'
+import { Check, ChevronDown, Sparkles, Wand2 } from 'lucide-react'
 
 const PLATFORMS = ['Meta', 'Google', 'TikTok', 'LinkedIn', 'Snapchat', 'Twitter/X', 'YouTube']
 const OBJECTIVES = ['Lead Generation', 'Conversions', 'Brand Awareness', 'Traffic', 'App Installs', 'Video Views', 'Engagement']
 
-// Realistic sample data matching the exact CampaignPerformanceInput schema
 const SAMPLE_DATA = {
   campaign_id: 'cmp_meta_genz_q2',
   platform: 'Meta',
   objective: 'Lead Generation',
   expected_metrics: { impressions: 100000, clicks: 2500, conversions: 150, spend: 2000, revenue: 7500 },
-  actual_metrics:   { impressions: 134000, clicks: 4200, conversions: 210, spend: 2150, revenue: 10500 },
+  actual_metrics: { impressions: 134000, clicks: 4200, conversions: 210, spend: 2150, revenue: 10500 },
   audiences: [{ name: 'Gen Z Students', attributes: { age_range: '18-24', segment: 'students', city_tier: 'Tier-1' } }],
   creatives: [{ id: 'crt_001', type: 'video', headline: 'Learn faster, earn sooner', primary_text: 'Short-form video showing student success story.' }],
 }
@@ -21,6 +20,45 @@ const inputStyle = {
   fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
 }
 const selectStyle = { ...inputStyle, cursor: 'pointer', appearance: 'none' }
+const emptyMetrics = () => ({ impressions: '', clicks: '', conversions: '', spend: '', revenue: '' })
+
+function FormSection({ eyebrow, title, description, children }) {
+  return (
+    <section className="analyze-section-card">
+      <div style={{ marginBottom: 14 }}>
+        <div className="analyze-section-eyebrow">{eyebrow}</div>
+        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{title}</h3>
+        {description && (
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>{description}</p>
+        )}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function StepButton({ index, title, detail, active, complete, disabled, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={
+        active
+          ? 'campaign-step-button campaign-step-button-active'
+          : complete
+            ? 'campaign-step-button campaign-step-button-complete'
+            : 'campaign-step-button'
+      }
+    >
+      <span className="campaign-step-index">{complete ? <Check size={13} /> : index}</span>
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>{title}</span>
+        <span style={{ fontSize: 11, color: active ? 'var(--text-secondary)' : 'var(--text-muted)' }}>{detail}</span>
+      </span>
+    </button>
+  )
+}
 
 function Field({ label, hint, children }) {
   return (
@@ -32,18 +70,16 @@ function Field({ label, hint, children }) {
   )
 }
 
-function MetricsGrid({ label, hint, value, onChange }) {
+function MetricsGrid({ value, onChange }) {
   const fields = [
     { key: 'impressions', label: 'Impressions', placeholder: '100000' },
-    { key: 'clicks',      label: 'Clicks',      placeholder: '2500' },
+    { key: 'clicks', label: 'Clicks', placeholder: '2500' },
     { key: 'conversions', label: 'Conversions', placeholder: '150' },
-    { key: 'spend',       label: 'Spend ($)',   placeholder: '500' },
-    { key: 'revenue',     label: 'Revenue ($) — optional', placeholder: '1200', optional: true },
+    { key: 'spend', label: 'Spend ($)', placeholder: '500' },
+    { key: 'revenue', label: 'Revenue ($) - optional', placeholder: '1200', optional: true },
   ]
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>{label}</div>
-      {hint && <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 0 8px' }}>{hint}</p>}
+    <div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         {fields.map(f => (
           <div key={f.key} style={f.key === 'revenue' ? { gridColumn: '1 / -1' } : {}}>
@@ -62,14 +98,37 @@ function MetricsGrid({ label, hint, value, onChange }) {
   )
 }
 
-const emptyMetrics = () => ({ impressions: '', clicks: '', conversions: '', spend: '', revenue: '' })
-
-export default function CampaignForm({ onSubmit, loading }) {
+export default function CampaignForm({ onSubmit, loading, onDraftChange = null }) {
   const [campaignId, setCampaignId] = useState('')
-  const [platform, setPlatform]     = useState('')
-  const [objective, setObjective]   = useState('')
-  const [expected, setExpected]     = useState(emptyMetrics())
-  const [actual, setActual]         = useState(emptyMetrics())
+  const [platform, setPlatform] = useState('')
+  const [objective, setObjective] = useState('')
+  const [expected, setExpected] = useState(emptyMetrics())
+  const [actual, setActual] = useState(emptyMetrics())
+  const [activeStep, setActiveStep] = useState('setup')
+
+  const setupComplete = Boolean(campaignId.trim() && platform && objective)
+  const expectedComplete = useMemo(
+    () => ['impressions', 'clicks', 'conversions', 'spend'].every(key => expected[key] !== '' && expected[key] != null),
+    [expected],
+  )
+  const actualComplete = useMemo(
+    () => ['impressions', 'clicks', 'conversions', 'spend'].every(key => actual[key] !== '' && actual[key] != null),
+    [actual],
+  )
+
+  useEffect(() => {
+    if (!onDraftChange) return
+    onDraftChange({
+      campaign_id: campaignId,
+      platform,
+      objective,
+      expected_metrics: expected,
+      actual_metrics: actual,
+      activeStep,
+      audiences: SAMPLE_DATA.audiences,
+      creatives: SAMPLE_DATA.creatives,
+    })
+  }, [campaignId, platform, objective, expected, actual, activeStep, onDraftChange])
 
   function fillSample() {
     setCampaignId(SAMPLE_DATA.campaign_id)
@@ -77,97 +136,136 @@ export default function CampaignForm({ onSubmit, loading }) {
     setObjective(SAMPLE_DATA.objective)
     setExpected(SAMPLE_DATA.expected_metrics)
     setActual(SAMPLE_DATA.actual_metrics)
+    setActiveStep('actual')
   }
+
+  useEffect(() => {
+    if (activeStep === 'setup' && setupComplete) setActiveStep('expected')
+    if (activeStep === 'expected' && expectedComplete) setActiveStep('actual')
+  }, [activeStep, expectedComplete, setupComplete])
 
   function handleSubmit() {
     const cleanMetrics = m => ({
       impressions: Number(m.impressions) || 0,
-      clicks:      Number(m.clicks) || 0,
+      clicks: Number(m.clicks) || 0,
       conversions: Number(m.conversions) || 0,
-      spend:       Number(m.spend) || 0,
+      spend: Number(m.spend) || 0,
       ...(m.revenue !== '' && m.revenue != null ? { revenue: Number(m.revenue) } : {}),
     })
 
     onSubmit({
-      campaign_id:      campaignId.trim(),
+      campaign_id: campaignId.trim(),
       platform,
       objective,
       expected_metrics: cleanMetrics(expected),
-      actual_metrics:   cleanMetrics(actual),
-      audiences: SAMPLE_DATA.audiences,   // kept simple — not exposed in form for now
-      creatives: SAMPLE_DATA.creatives,   // kept simple — not exposed in form for now
+      actual_metrics: cleanMetrics(actual),
+      audiences: SAMPLE_DATA.audiences,
+      creatives: SAMPLE_DATA.creatives,
       timestamp: new Date().toISOString(),
     })
   }
 
-  const isValid = campaignId.trim() && platform && objective
+  const isValid = setupComplete && expectedComplete && actualComplete
 
   return (
-    <div>
-      {/* Fill sample button */}
+    <div className="campaign-form-shell" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <button
-        className="btn-ghost"
+        className="btn-ghost campaign-fill-button"
         onClick={fillSample}
-        style={{ width: '100%', justifyContent: 'center', marginBottom: 16 }}
+        style={{ width: '100%', justifyContent: 'center' }}
       >
-        ✦ Fill Sample Data
+        <Wand2 size={14} /> Fill Sample Data
       </button>
 
-      <div style={{ height: 1, background: 'var(--border)', marginBottom: 16 }} />
-
-      {/* Campaign identity */}
-      <Field label="Campaign ID *">
-        <input
-          value={campaignId}
-          onChange={e => setCampaignId(e.target.value)}
-          placeholder="e.g. cmp_meta_q2_launch"
-          style={inputStyle}
+      <div className="campaign-step-grid">
+        <StepButton
+          index="1"
+          title="Campaign Setup"
+          detail={setupComplete ? 'Ready' : 'Add identity'}
+          active={activeStep === 'setup'}
+          complete={setupComplete}
+          onClick={() => setActiveStep('setup')}
         />
-      </Field>
+        <StepButton
+          index="2"
+          title="Expected Metrics"
+          detail={expectedComplete ? 'Ready' : 'Set targets'}
+          active={activeStep === 'expected'}
+          complete={expectedComplete}
+          disabled={!setupComplete}
+          onClick={() => setActiveStep('expected')}
+        />
+        <StepButton
+          index="3"
+          title="Actual Metrics"
+          detail={actualComplete ? 'Ready' : 'Add results'}
+          active={activeStep === 'actual'}
+          complete={actualComplete}
+          disabled={!setupComplete || !expectedComplete}
+          onClick={() => setActiveStep('actual')}
+        />
+      </div>
 
-      <Field label="Platform *">
-        <div style={{ position: 'relative' }}>
-          <select value={platform} onChange={e => setPlatform(e.target.value)} style={selectStyle}>
-            <option value="">Select platform</option>
-            {PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)', fontSize: 10 }}>▼</span>
-        </div>
-      </Field>
+      {activeStep === 'setup' && (
+        <FormSection
+          eyebrow="Campaign Setup"
+          title="Campaign Setup"
+          description="Define the campaign identity before comparing planned and actual performance."
+        >
+          <Field label="Campaign ID *">
+            <input
+              value={campaignId}
+              onChange={e => setCampaignId(e.target.value)}
+              placeholder="e.g. cmp_meta_q2_launch"
+              style={inputStyle}
+            />
+          </Field>
 
-      <Field label="Objective *">
-        <div style={{ position: 'relative' }}>
-          <select value={objective} onChange={e => setObjective(e.target.value)} style={selectStyle}>
-            <option value="">Select objective</option>
-            {OBJECTIVES.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-          <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)', fontSize: 10 }}>▼</span>
-        </div>
-      </Field>
+          <Field label="Platform *">
+            <div style={{ position: 'relative' }}>
+              <select value={platform} onChange={e => setPlatform(e.target.value)} style={selectStyle}>
+                <option value="">Select platform</option>
+                {PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)', display: 'inline-flex' }}>
+                <ChevronDown size={14} />
+              </span>
+            </div>
+          </Field>
 
-      <div style={{ height: 1, background: 'var(--border)', margin: '16px 0' }} />
+          <Field label="Objective *">
+            <div style={{ position: 'relative' }}>
+              <select value={objective} onChange={e => setObjective(e.target.value)} style={selectStyle}>
+                <option value="">Select objective</option>
+                {OBJECTIVES.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+              <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)', display: 'inline-flex' }}>
+                <ChevronDown size={14} />
+              </span>
+            </div>
+          </Field>
+        </FormSection>
+      )}
 
-      <MetricsGrid
-        label="Expected Metrics"
-        hint="Planned values before campaign launch"
-        value={expected}
-        onChange={setExpected}
-      />
+      {activeStep === 'expected' && (
+        <FormSection eyebrow="Expected Metrics" title="Targets" description="Planned values before launch.">
+          <MetricsGrid value={expected} onChange={setExpected} />
+        </FormSection>
+      )}
 
-      <MetricsGrid
-        label="Actual Metrics"
-        hint="Real performance after campaign ran"
-        value={actual}
-        onChange={setActual}
-      />
+      {activeStep === 'actual' && (
+        <FormSection eyebrow="Actual Metrics" title="Results" description="Observed values after the campaign ran.">
+          <MetricsGrid value={actual} onChange={setActual} />
+        </FormSection>
+      )}
 
       <button
-        className="btn-primary"
+        className="btn-primary campaign-submit-button"
         onClick={handleSubmit}
         disabled={!isValid || loading}
-        style={{ marginTop: 4 }}
+        style={{ marginTop: 2, boxShadow: '0 0 0 1px var(--accent-border), 0 12px 24px var(--accent-glow)' }}
       >
-        {loading ? <><Spinner size={14} /> Analyzing...</> : '⚡ Analyze Campaign'}
+        <Sparkles size={14} /> Analyze Campaign
       </button>
     </div>
   )

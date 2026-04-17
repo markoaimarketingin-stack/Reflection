@@ -1,46 +1,95 @@
-// Maps exactly to AnalyzeCampaignResponse from the backend schema
-import { useState } from 'react'
-import { Card, SectionTitle, Tag, DeltaChip, ScoreBar, ImpactBar, EmptyState } from './ui'
+import { useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, Copy, Download, Lightbulb, Radar, Sparkles, TrendingDown, TrendingUp } from 'lucide-react'
+import { Card, SectionTitle, Tag, ScoreBar, ImpactBar, EmptyState } from './ui'
+import MetricCard from './MetricCard'
+import InsightCard from './InsightCard'
+import RecommendationList from './RecommendationList'
+import { exportResultsPDF } from '../lib/ExportPDF'
 
-// ── Comparison ────────────────────────────────────────────────────────────────
+function copyText(text) {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => {})
+  }
+}
+
+function ResultsHero({ topInsight, biggestIssue, onExport, onCopy }) {
+  return (
+    <div className="results-hero-grid">
+      <div className="results-highlight-card">
+        <div className="results-highlight-top">
+          <div className="results-highlight-icon">
+            <Sparkles size={16} />
+          </div>
+          <div className="results-highlight-label">Top Insight</div>
+          <button type="button" className="results-action-button results-export-hide" onClick={onCopy} aria-label="Copy top insight">
+            <Copy size={14} />
+          </button>
+        </div>
+        <div className="results-highlight-title">{topInsight?.title || 'Strongest takeaway'}</div>
+        <p className="results-highlight-body">{topInsight?.body || 'No primary insight available yet.'}</p>
+      </div>
+
+      <div className="results-highlight-card results-highlight-card-danger">
+        <div className="results-highlight-top">
+          <div className="results-highlight-icon results-highlight-icon-danger">
+            <AlertTriangle size={16} />
+          </div>
+          <div className="results-highlight-label">Biggest Issue</div>
+          <button type="button" className="results-action-button results-export-hide" onClick={onExport} aria-label="Export PDF">
+            <Download size={14} />
+          </button>
+        </div>
+        <div className="results-highlight-title">{biggestIssue?.title || 'No critical issue detected'}</div>
+        <p className="results-highlight-body">{biggestIssue?.body || 'Performance did not surface a major negative outlier.'}</p>
+      </div>
+    </div>
+  )
+}
+
 function ComparisonSection({ report }) {
   const { deltas, performance_score, summary, actual_rates } = report
   return (
     <Card>
-      <SectionTitle>📈 Performance Comparison</SectionTitle>
-      <ScoreBar score={performance_score} />
-
-      {/* 4 delta chips */}
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
-        gap: 8, marginTop: 16,
-        background: 'var(--surface)', borderRadius: 10, border: '1px solid var(--border)',
-        padding: '4px 0',
-      }}>
-        <DeltaChip {...deltas.ctr_diff}  label="CTR" />
-        <DeltaChip {...deltas.cvr_diff}  label="CVR" />
-        <DeltaChip {...deltas.cpa_diff}  label="CPA" />
-        <DeltaChip {...deltas.roas_diff} label="ROAS" />
+      <div className="performance-hero">
+        <div>
+          <SectionTitle icon={Radar}>Performance Comparison</SectionTitle>
+          <div className="performance-score-label">Performance Score</div>
+          <div className="performance-score-value">
+            {performance_score > 0 ? '+' : ''}{Math.round(performance_score)}
+          </div>
+        </div>
+        <div className="performance-score-bar-wrap">
+          <ScoreBar score={performance_score} />
+        </div>
       </div>
 
-      {/* Actual rates row */}
-      {actual_rates && (
-        <div style={{ display: 'flex', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
-          {[
-            ['CTR', actual_rates.ctr != null ? `${(actual_rates.ctr * 100).toFixed(2)}%` : '—'],
-            ['CVR', actual_rates.cvr != null ? `${(actual_rates.cvr * 100).toFixed(2)}%` : '—'],
-            ['CPA', actual_rates.cpa != null ? `$${actual_rates.cpa.toFixed(2)}` : '—'],
-            ['ROAS', actual_rates.roas != null ? `${actual_rates.roas.toFixed(2)}x` : '—'],
-          ].map(([k, v]) => (
-            <div key={k} style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-              <span style={{ color: 'var(--text-muted)' }}>{k}: </span>
-              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{v}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="metric-card-grid">
+        <MetricCard
+          label="CTR"
+          value={actual_rates?.ctr != null ? `${(actual_rates.ctr * 100).toFixed(2)}%` : '—'}
+          delta={deltas.ctr_diff?.pct_diff}
+          positive={deltas.ctr_diff?.favorable}
+        />
+        <MetricCard
+          label="CVR"
+          value={actual_rates?.cvr != null ? `${(actual_rates.cvr * 100).toFixed(2)}%` : '—'}
+          delta={deltas.cvr_diff?.pct_diff}
+          positive={deltas.cvr_diff?.favorable}
+        />
+        <MetricCard
+          label="CPA"
+          value={actual_rates?.cpa != null ? `$${actual_rates.cpa.toFixed(2)}` : '—'}
+          delta={deltas.cpa_diff?.pct_diff}
+          positive={deltas.cpa_diff?.favorable}
+        />
+        <MetricCard
+          label="ROAS"
+          value={actual_rates?.roas != null ? `${actual_rates.roas.toFixed(2)}x` : '—'}
+          delta={deltas.roas_diff?.pct_diff}
+          positive={deltas.roas_diff?.favorable}
+        />
+      </div>
 
-      {/* Summary bullets */}
       {summary?.length > 0 && (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {summary.map((s, i) => (
@@ -55,7 +104,6 @@ function ComparisonSection({ report }) {
   )
 }
 
-// ── Patterns ──────────────────────────────────────────────────────────────────
 function FindingRow({ finding }) {
   return (
     <div style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
@@ -63,10 +111,15 @@ function FindingRow({ finding }) {
         <span style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5, flex: 1 }}>
           {finding.description}
         </span>
-        <span style={{
-          fontSize: 12, fontWeight: 600, flexShrink: 0, fontVariantNumeric: 'tabular-nums',
-          color: finding.impact_score >= 0 ? 'var(--green)' : 'var(--red)',
-        }}>
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            flexShrink: 0,
+            fontVariantNumeric: 'tabular-nums',
+            color: finding.impact_score >= 0 ? 'var(--green)' : 'var(--red)',
+          }}
+        >
           {finding.impact_score > 0 ? '+' : ''}{finding.impact_score.toFixed(1)}
         </span>
       </div>
@@ -81,182 +134,224 @@ function FindingRow({ finding }) {
 
 function PatternsSection({ pattern_report }) {
   const [open, setOpen] = useState('winning_audiences')
+  const [collapsed, setCollapsed] = useState(false)
 
   const groups = [
-    { key: 'winning_audiences',        label: '👥 Winning Audiences',         color: 'green' },
-    { key: 'high_performing_creatives',label: '🎨 High-Performing Creatives',  color: 'blue' },
-    { key: 'budget_inefficiencies',    label: '⚠ Budget Inefficiencies',       color: 'amber' },
-    { key: 'platform_trends',          label: '📡 Platform Trends',            color: 'blue' },
-    { key: 'clusters',                 label: '🔵 Clusters',                   color: 'default' },
+    { key: 'winning_audiences', label: 'Winning Audiences' },
+    { key: 'high_performing_creatives', label: 'High-Performing Creatives' },
+    { key: 'budget_inefficiencies', label: 'Budget Inefficiencies' },
+    { key: 'platform_trends', label: 'Platform Trends' },
+    { key: 'clusters', label: 'Clusters' },
   ].filter(g => pattern_report[g.key]?.length > 0)
 
-  if (!groups.length) return (
-    <Card>
-      <SectionTitle>🔍 Patterns</SectionTitle>
-      <EmptyState message="No patterns detected for this campaign yet." />
-    </Card>
-  )
+  if (!groups.length) {
+    return (
+      <Card>
+        <SectionTitle icon={TrendingUp}>Patterns</SectionTitle>
+        <EmptyState message="No patterns detected for this campaign yet." />
+      </Card>
+    )
+  }
 
   return (
     <Card>
-      <SectionTitle>🔍 Patterns</SectionTitle>
+      <div className="results-section-header">
+        <SectionTitle icon={TrendingUp}>Patterns</SectionTitle>
+        <button type="button" className="results-collapse-button" onClick={() => setCollapsed(value => !value)}>
+          {collapsed ? 'Expand' : 'Collapse'}
+        </button>
+      </div>
 
-      {/* Auto tags */}
-      {pattern_report.auto_tags?.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-          {pattern_report.auto_tags.map(t => <Tag key={t}>{t}</Tag>)}
+      {!collapsed && (
+        <>
+          {pattern_report.auto_tags?.length > 0 && (
+            <div className="pattern-pill-row">
+              {pattern_report.auto_tags.map(t => <span key={t} className="pattern-pill">{t}</span>)}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
+            {groups.map(g => (
+              <button
+                key={g.key}
+                onClick={() => setOpen(g.key)}
+                className={open === g.key ? 'results-premium-tab workspace-right-tab workspace-right-tab-active' : 'results-premium-tab workspace-right-tab'}
+              >
+                {g.label}
+                <span style={{ marginLeft: 5, opacity: 0.6 }}>({pattern_report[g.key].length})</span>
+              </button>
+            ))}
+          </div>
+
+          <div>
+            {(pattern_report[open] || []).map(f => (
+              <FindingRow key={f.finding_id} finding={f} />
+            ))}
+          </div>
+        </>
+      )}
+    </Card>
+  )
+}
+
+function InsightsSection({ insights }) {
+  return (
+    <Card>
+      <SectionTitle icon={Lightbulb}>Insights</SectionTitle>
+      <InsightCard insights={insights} />
+    </Card>
+  )
+}
+
+function RecommendationsSection({ insights }) {
+  const [collapsed, setCollapsed] = useState(false)
+
+  if (!insights.recommendations?.length) return null
+  return (
+    <Card>
+      <div className="results-section-header">
+        <SectionTitle icon={Sparkles}>Recommendations</SectionTitle>
+        <button type="button" className="results-collapse-button" onClick={() => setCollapsed(value => !value)}>
+          {collapsed ? 'Expand' : 'Collapse'}
+        </button>
+      </div>
+      {!collapsed && (
+        <RecommendationList
+          items={insights.recommendations}
+          whyReasons={[...(insights.anomalies || []), ...(insights.key_learnings || []), insights.narrative_summary].filter(Boolean)}
+        />
+      )}
+    </Card>
+  )
+}
+
+function SimilarSection({ similar_campaigns }) {
+  const [collapsed, setCollapsed] = useState(true)
+
+  if (!similar_campaigns?.length) return null
+  return (
+    <Card>
+      <div className="results-section-header">
+        <SectionTitle icon={TrendingDown}>Similar Campaigns</SectionTitle>
+        <button type="button" className="results-collapse-button" onClick={() => setCollapsed(value => !value)}>
+          {collapsed ? 'Expand' : 'Collapse'}
+        </button>
+      </div>
+      {!collapsed && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {similar_campaigns.map((c, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                gap: 10,
+                padding: '10px 12px',
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, minWidth: 36 }}>
+                {Math.round(c.score * 100)}%
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>
+                  {c.campaign_id || c.document_id}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--text-muted)',
+                    overflow: 'hidden',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                  }}
+                >
+                  {c.summary}
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
+    </Card>
+  )
+}
 
-      {/* Tab switcher */}
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
-        {groups.map(g => (
+function deriveBiggestIssue(report) {
+  const candidateMap = [
+    { key: 'ctr_diff', title: 'CTR is trailing plan' },
+    { key: 'cvr_diff', title: 'CVR is below target' },
+    { key: 'cpa_diff', title: 'CPA is too high' },
+    { key: 'roas_diff', title: 'ROAS is under pressure' },
+  ]
+
+  const candidates = candidateMap
+    .map(item => ({ ...item, data: report?.deltas?.[item.key] }))
+    .filter(item => item.data?.pct_diff != null && item.data?.favorable === false)
+    .sort((a, b) => Math.abs(b.data.pct_diff) - Math.abs(a.data.pct_diff))
+
+  if (!candidates.length) return null
+
+  const top = candidates[0]
+  return {
+    title: top.title,
+    body: `Current analysis shows ${Math.abs(top.data.pct_diff).toFixed(1)}% variance versus target, making this the main drag on campaign efficiency.`,
+  }
+}
+
+export default function ResultsPanel({ result, forcedTab, showOverview = true }) {
+  const [activeTab, setActiveTab] = useState(forcedTab || 'performance')
+
+  useEffect(() => {
+    if (forcedTab) setActiveTab(forcedTab)
+  }, [forcedTab])
+
+  if (!result) return null
+
+  const { comparison_report, pattern_report, insights, similar_campaigns } = result
+  const topInsight = useMemo(() => ({
+    title: insights?.key_learnings?.[0] || 'Narrative summary',
+    body: insights?.narrative_summary || 'No insight summary available yet.',
+  }), [insights])
+  const biggestIssue = useMemo(() => deriveBiggestIssue(comparison_report), [comparison_report])
+
+  const tabs = [
+    { id: 'performance', label: 'Performance' },
+    { id: 'insights', label: 'Insights' },
+    { id: 'patterns', label: 'Patterns' },
+    { id: 'recommendations', label: 'Recommendations' },
+  ]
+
+  return (
+    <div className="fade-up" style={{ display: 'flex', flexDirection: 'column', gap: 16 }} data-export-results="true">
+      {showOverview && (
+        <ResultsHero
+          topInsight={topInsight}
+          biggestIssue={biggestIssue}
+          onCopy={() => copyText(topInsight.body)}
+          onExport={() => exportResultsPDF()}
+        />
+      )}
+
+      <div className="results-premium-tabs" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {tabs.map(tab => (
           <button
-            key={g.key}
-            onClick={() => setOpen(g.key)}
-            style={{
-              padding: '5px 10px', borderRadius: 8, fontSize: 12, fontFamily: 'inherit',
-              cursor: 'pointer', border: '1px solid',
-              background: open === g.key ? 'var(--accent-muted)' : 'transparent',
-              borderColor: open === g.key ? 'var(--accent-border)' : 'var(--border)',
-              color: open === g.key ? 'var(--accent)' : 'var(--text-secondary)',
-              transition: 'all 0.15s',
-            }}
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={activeTab === tab.id ? 'results-premium-tab workspace-right-tab workspace-right-tab-active' : 'results-premium-tab workspace-right-tab'}
           >
-            {g.label}
-            <span style={{ marginLeft: 5, opacity: 0.6 }}>({pattern_report[g.key].length})</span>
+            {tab.label}
           </button>
         ))}
       </div>
 
-      {/* Active group findings */}
-      <div>
-        {(pattern_report[open] || []).map(f => (
-          <FindingRow key={f.finding_id} finding={f} />
-        ))}
-      </div>
-    </Card>
-  )
-}
-
-// ── Insights ──────────────────────────────────────────────────────────────────
-function InsightsSection({ insights }) {
-  return (
-    <Card>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-        <SectionTitle>🧠 Insights</SectionTitle>
-        <Tag color={insights.source === 'openai' ? 'blue' : 'default'}>
-          {insights.source === 'openai' ? 'GPT-powered' : 'Deterministic'}
-        </Tag>
-      </div>
-
-      <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 16 }}>
-        {insights.narrative_summary}
-      </p>
-
-      {insights.key_learnings?.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
-            Key Learnings
-          </div>
-          {insights.key_learnings.map((l, i) => (
-            <div key={i} style={{
-              display: 'flex', gap: 8, padding: '8px 10px', marginBottom: 6,
-              background: 'var(--accent-muted)', border: '1px solid var(--accent-border)', borderRadius: 8,
-            }}>
-              <span style={{ color: 'var(--accent)', flexShrink: 0 }}>✦</span>
-              <span style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5 }}>{l}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {insights.anomalies?.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>
-            Anomalies
-          </div>
-          {insights.anomalies.map((a, i) => (
-            <div key={i} style={{
-              display: 'flex', gap: 8, padding: '8px 10px', marginBottom: 6,
-              background: 'var(--amber-muted)', border: '1px solid var(--amber-border)', borderRadius: 8,
-            }}>
-              <span style={{ color: 'var(--amber)', flexShrink: 0 }}>⚠</span>
-              <span style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5 }}>{a}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
-  )
-}
-
-// ── Recommendations ───────────────────────────────────────────────────────────
-function RecommendationsSection({ insights }) {
-  if (!insights.recommendations?.length) return null
-  return (
-    <Card>
-      <SectionTitle>💡 Recommendations</SectionTitle>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {insights.recommendations.map((r, i) => (
-          <div key={i} style={{
-            display: 'flex', gap: 10, padding: '10px 12px',
-            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-          }}>
-            <div style={{
-              width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
-              background: 'var(--accent-muted)', border: '1px solid var(--accent-border)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 11, fontWeight: 700, color: 'var(--accent)',
-            }}>{i + 1}</div>
-            <span style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5 }}>{r}</span>
-          </div>
-        ))}
-      </div>
-    </Card>
-  )
-}
-
-// ── Similar campaigns ─────────────────────────────────────────────────────────
-function SimilarSection({ similar_campaigns }) {
-  if (!similar_campaigns?.length) return null
-  return (
-    <Card>
-      <SectionTitle>🔗 Similar Campaigns</SectionTitle>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {similar_campaigns.map((c, i) => (
-          <div key={i} style={{
-            display: 'flex', gap: 10, padding: '10px 12px',
-            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-          }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, minWidth: 36 }}>
-              {Math.round(c.score * 100)}%
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>
-                {c.campaign_id || c.document_id}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                {c.summary}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Card>
-  )
-}
-
-// ── Main export ───────────────────────────────────────────────────────────────
-export default function ResultsPanel({ result }) {
-  if (!result) return null
-  const { comparison_report, pattern_report, insights, similar_campaigns } = result
-  return (
-    <div className="fade-up" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <ComparisonSection report={comparison_report} />
-      <InsightsSection insights={insights} />
-      <PatternsSection pattern_report={pattern_report} />
-      <RecommendationsSection insights={insights} />
+      {activeTab === 'performance' && <ComparisonSection report={comparison_report} />}
+      {activeTab === 'insights' && <InsightsSection insights={insights} />}
+      {activeTab === 'patterns' && <PatternsSection pattern_report={pattern_report} />}
+      {activeTab === 'recommendations' && <RecommendationsSection insights={insights} />}
       <SimilarSection similar_campaigns={similar_campaigns} />
     </div>
   )
