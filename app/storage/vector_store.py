@@ -1,7 +1,7 @@
 from __future__ import annotations
-import uuid
+
 import hashlib
-from threading import Lock
+import uuid
 from typing import Any
 
 import numpy as np
@@ -18,11 +18,10 @@ except ImportError:
 class SemanticMemoryStore:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self._lock = Lock()
         self._client = None
 
         if settings.openai_api_key and OpenAI is not None:
-            self._client = OpenAI(api_key=settings.openai_api_key)
+            self._client = OpenAI(api_key=settings.openai_api_key, base_url=settings.base_url)
 
     def _embed_texts(self, texts: list[str]) -> list[list[float]]:
         if self._client is not None:
@@ -32,9 +31,8 @@ class SemanticMemoryStore:
                     input=texts,
                 )
                 return [item.embedding for item in response.data]
-            except Exception as e:
-                print(f"Embedding failed, falling back: {e}")
-                
+            except Exception:
+                pass
 
         return [self._hash_embed(text) for text in texts]
 
@@ -49,16 +47,7 @@ class SemanticMemoryStore:
             vector = vector / norm
         return vector.astype(float).tolist()
 
-    # ------------------------------------------------------------------
-    # UPSERT INTO SUPABASE
-    # ------------------------------------------------------------------
-
     def upsert_documents(self, supabase, documents: list[dict[str, Any]]) -> bool:
-        """
-        Each document dict must have:
-            source_table, source_id, agent_id, summary
-        Optional: metadata, created_at
-        """
         if not documents:
             return True
 
@@ -76,13 +65,8 @@ class SemanticMemoryStore:
             }
             for doc, embedding in zip(documents, embeddings)
         ]
-        print("SUMMARY DEBUG:", summaries)
         supabase.table("agent_embeddings").insert(rows).execute()
         return True
-
-    # ------------------------------------------------------------------
-    # QUERY SIMILAR FROM SUPABASE
-    # ------------------------------------------------------------------
 
     def query_similar(
         self,
@@ -104,7 +88,7 @@ class SemanticMemoryStore:
 
         seen_campaigns = set()
         results = []
-        
+
         for item in response.data or []:
             summary = item.get("summary", "")
 
@@ -129,5 +113,5 @@ class SemanticMemoryStore:
                         metadata={},
                     )
                 )
-        
+
         return results

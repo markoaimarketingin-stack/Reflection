@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks
 from app.agents.supervisor_agent import SupervisorAgent
 from app.core.config import Settings
 from app.models.schemas import (
+    AgentChatResponse,
     AnalyzeCampaignResponse,
     CampaignPerformanceInput,
     RecommendationResponse,
@@ -47,6 +48,13 @@ class ReflectionLearningEngine:
 
     def get_top_insights(self, limit: int | None = None):
         return self.repository.fetch_top_insights(limit or self.settings.insights_limit)
+
+    def chat_with_agent(self, *, message: str, context: dict | None = None) -> AgentChatResponse:
+        reply, model = self.insight_service.generate_chat_reply(
+            message=message,
+            context=context or {},
+        )
+        return AgentChatResponse(reply=reply, model=model)
 
     def get_patterns(self, limit: int = 20):
         return self.repository.fetch_patterns(limit)

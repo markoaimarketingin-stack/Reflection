@@ -1,13 +1,16 @@
-// TODO: add Authorization header here when auth is implemented
-// TODO: add campaign history filtering params when filter UI is added
-// TODO: add export/report endpoint when export feature is built
-
 const BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+const API_AUTH_KEY = import.meta.env.VITE_API_AUTH_KEY
 
 async function request(path, options = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(API_AUTH_KEY ? { 'X-API-Key': API_AUTH_KEY } : {}),
+    ...(options.headers || {}),
+  }
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers,
   })
   if (!res.ok) {
     let msg = `Server error (${res.status})`
@@ -26,17 +29,21 @@ export function analyzeCampaign(payload) {
   return request('/analyze-campaign', { method: 'POST', body: JSON.stringify(payload) })
 }
 
-// GET /insights?limit=N → InsightRecord[]
+export function sendAgentChat(message, context = {}) {
+  return request('/agent-chat', {
+    method: 'POST',
+    body: JSON.stringify({ message, context }),
+  })
+}
+
 export function getInsights(limit = 30) {
   return request(`/insights?limit=${limit}`)
 }
 
-// GET /patterns?limit=N → PatternRecord[]
 export function getPatterns(limit = 30) {
   return request(`/patterns?limit=${limit}`)
 }
 
-// GET /recommendations → RecommendationResponse
 export function getRecommendations(platform, objective) {
   const params = new URLSearchParams()
   if (platform) params.set('platform', platform)
