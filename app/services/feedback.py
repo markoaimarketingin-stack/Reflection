@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 from datetime import datetime, timezone
+
 import numpy as np
 
 from app.core.config import Settings
@@ -28,7 +30,6 @@ class FeedbackLoopEngine:
         comparison: ComparisonReport,
         pattern_report: PatternReport,
     ) -> WeightSnapshot:
-
         self.repository.insert_campaign_performance(
             self.settings.agent_id,
             comparison.performance_score,
@@ -105,10 +106,22 @@ class FeedbackLoopEngine:
             updated_signals=updated_signals,
         )
 
-        write_json(self.settings.weights_path, snapshot)
+        if self.settings.enable_local_output:
+            write_json(self.settings.weights_path, snapshot)
         return snapshot
 
     def get_current_snapshot(self) -> WeightSnapshot:
+        if not self.settings.enable_local_output:
+            signal_weights = {
+                key: signal.weight for key, signal in sorted(self.repository.fetch_signal_weights().items())
+            }
+            return WeightSnapshot(
+                generated_at=datetime.now(timezone.utc),
+                scoring_weights=dict(DEFAULT_SCORING_WEIGHTS),
+                signal_weights=signal_weights,
+                updated_signals=[],
+            )
+
         snapshot = read_json(self.settings.weights_path, None)
         if snapshot is None:
             self._ensure_weights_file()
@@ -116,7 +129,7 @@ class FeedbackLoopEngine:
         return WeightSnapshot.model_validate(snapshot)
 
     def _ensure_weights_file(self) -> None:
-        if self.settings.weights_path.exists():
+        if not self.settings.enable_local_output or self.settings.weights_path.exists():
             return
 
         snapshot = WeightSnapshot(
@@ -169,4 +182,3 @@ class FeedbackLoopEngine:
                 signal_keys.add(finding.signal_key)
 
         return sorted(signal_keys)
-

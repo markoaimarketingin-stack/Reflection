@@ -1,10 +1,11 @@
 from __future__ import annotations
-from unittest import result
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
 
-from app.core.bootstrap import get_engine
+from app.core.bootstrap import get_engine, get_settings
 from app.models.schemas import (
+    AgentChatRequest,
+    AgentChatResponse,
     AnalyzeCampaignResponse,
     CampaignPerformanceInput,
     InsightRecord,
@@ -15,16 +16,31 @@ from app.services.analyzer import ReflectionLearningEngine
 
 router = APIRouter()
 
+
 def clean_text(obj):
     if isinstance(obj, dict):
         return {k: clean_text(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
+    if isinstance(obj, list):
         return [clean_text(i) for i in obj if i and i != "string"]
-    elif isinstance(obj, str):
+    if isinstance(obj, str):
         return "" if obj.lower() == "string" else obj
     return obj
 
-@router.post("/analyze-campaign", response_model=AnalyzeCampaignResponse)
+
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    settings = get_settings()
+    if not settings.api_auth_key:
+        return
+    if x_api_key == settings.api_auth_key:
+        return
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+
+
+@router.post(
+    "/analyze-campaign",
+    response_model=AnalyzeCampaignResponse,
+    dependencies=[Depends(require_api_key)],
+)
 def analyze_campaign(
     payload: CampaignPerformanceInput,
     background_tasks: BackgroundTasks,
@@ -34,7 +50,23 @@ def analyze_campaign(
     return clean_text(result)
 
 
-@router.get("/insights", response_model=list[InsightRecord])
+@router.post(
+    "/agent-chat",
+    response_model=AgentChatResponse,
+    dependencies=[Depends(require_api_key)],
+)
+def agent_chat(
+    payload: AgentChatRequest,
+    engine: ReflectionLearningEngine = Depends(get_engine),
+) -> AgentChatResponse:
+    return engine.chat_with_agent(message=payload.message, context=payload.context)
+
+
+@router.get(
+    "/insights",
+    response_model=list[InsightRecord],
+    dependencies=[Depends(require_api_key)],
+)
 def get_insights(
     limit: int = Query(default=10, ge=1, le=100),
     engine: ReflectionLearningEngine = Depends(get_engine),
@@ -42,7 +74,11 @@ def get_insights(
     return engine.get_top_insights(limit=limit)
 
 
-@router.get("/patterns", response_model=list[PatternRecord])
+@router.get(
+    "/patterns",
+    response_model=list[PatternRecord],
+    dependencies=[Depends(require_api_key)],
+)
 def get_patterns(
     limit: int = Query(default=20, ge=1, le=100),
     engine: ReflectionLearningEngine = Depends(get_engine),
@@ -50,7 +86,11 @@ def get_patterns(
     return engine.get_patterns(limit=limit)
 
 
-@router.get("/recommendations", response_model=RecommendationResponse)
+@router.get(
+    "/recommendations",
+    response_model=RecommendationResponse,
+    dependencies=[Depends(require_api_key)],
+)
 def get_recommendations(
     platform: str | None = Query(default=None),
     objective: str | None = Query(default=None),

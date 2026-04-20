@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _split_csv(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str
@@ -21,10 +27,12 @@ class Settings:
     insights_limit: int
     agent_id: str
     supabase_url: str
-    base_url: str
+    base_url: str | None
     supabase_key: str
     enable_local_output: bool
-    
+    cors_origins: tuple[str, ...]
+    api_auth_key: str | None
+
     @classmethod
     def load(cls) -> "Settings":
         base_dir = Path(__file__).resolve().parents[2]
@@ -38,6 +46,10 @@ class Settings:
         weights_path = base_dir / os.getenv("MARKO_WEIGHTS_PATH", "data/weights.json")
 
         agent_id = os.getenv("agent_id", "default_agent")
+        cors_origins = _split_csv(os.getenv("FRONTEND_ORIGINS")) or (
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        )
 
         return cls(
             app_name="Reflection & Learning Engine",
@@ -51,7 +63,7 @@ class Settings:
             insights_model=os.getenv("MARKO_INSIGHTS_MODEL", "openrouter/free"),
             embedding_model=os.getenv(
                 "MARKO_EMBEDDING_MODEL",
-                "sentence-transformers/all-MiniLM-L6-v2"
+                "sentence-transformers/all-MiniLM-L6-v2",
             ),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             base_url=os.getenv("OPENAI_BASE_URL"),
@@ -60,6 +72,8 @@ class Settings:
             supabase_url=os.getenv("SUPABASE_URL"),
             supabase_key=os.getenv("SUPABASE_KEY"),
             enable_local_output=os.getenv("ENABLE_LOCAL_OUTPUT", "false").lower() == "true",
+            cors_origins=cors_origins,
+            api_auth_key=os.getenv("API_AUTH_KEY"),
         )
 
     def ensure_directories(self) -> None:
@@ -67,4 +81,5 @@ class Settings:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.vector_path.mkdir(parents=True, exist_ok=True)
         self.vector_fallback_path.parent.mkdir(parents=True, exist_ok=True)
-        self.weights_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.enable_local_output:
+            self.weights_path.parent.mkdir(parents=True, exist_ok=True)

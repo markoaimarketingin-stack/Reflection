@@ -1,16 +1,13 @@
 from __future__ import annotations
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
-import os
 
 from app.api.routes import router
 from app.core.bootstrap import get_settings
 
-# LOAD ENV
 load_dotenv()
-
 settings = get_settings()
 
 app = FastAPI(
@@ -19,28 +16,18 @@ app = FastAPI(
     summary="Campaign retrospective system for memory-backed learning loops.",
 )
 
-# ✅ ADD THIS BLOCK (CORS FIX)
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "*"  # fast fix (ok for now)
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=list(settings.cors_origins),
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# ROUTES
 app.include_router(router)
 
-@app.get("/")
-def home():
-    return {"status": "running"}
 
-# TEMP DEBUG (remove later)
-print("DB:", os.getenv("DATABASE_URL"))
-print("AGENT:", os.getenv("agent_id"))
+@app.get("/")
+def home() -> dict[str, str]:
+    return {"status": "running"}

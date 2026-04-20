@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,9 +22,14 @@ class SupabaseRepository:
         self.settings = settings
         self._db = supabase
 
-    # ------------------------------------------------------------------
-    # CAMPAIGNS
-    # ------------------------------------------------------------------
+    def _storage_campaign_id(self, campaign_id: str) -> str:
+        return f"{self.settings.agent_id}::{campaign_id}"
+
+    def _public_campaign_id(self, campaign_id: str) -> str:
+        prefix = f"{self.settings.agent_id}::"
+        if campaign_id.startswith(prefix):
+            return campaign_id[len(prefix):]
+        return campaign_id
 
     def save_campaign(
         self,
@@ -36,7 +40,7 @@ class SupabaseRepository:
     ) -> None:
         self._db.table("campaigns").upsert(
             {
-                "campaign_id": payload.campaign_id,
+                "campaign_id": self._storage_campaign_id(payload.campaign_id),
                 "agent_id": self.settings.agent_id,
                 "platform": payload.platform,
                 "objective": payload.objective,
@@ -70,7 +74,7 @@ class SupabaseRepository:
         for row in response.data or []:
             history.append(
                 CampaignPerformanceInput(
-                    campaign_id=row["campaign_id"],
+                    campaign_id=self._public_campaign_id(row["campaign_id"]),
                     platform=row["platform"],
                     objective=row["objective"],
                     expected_metrics=row["expected_metrics"],
@@ -101,10 +105,6 @@ class SupabaseRepository:
             "performance_score": score
         }).execute()
 
-    # ------------------------------------------------------------------
-    # PERFORMANCE LOGS
-    # ------------------------------------------------------------------
-
     def save_performance_log(
         self,
         campaign_id: str,
@@ -112,7 +112,7 @@ class SupabaseRepository:
     ) -> None:
         self._db.table("performance_logs").insert(
             {
-                "campaign_id": campaign_id,
+                "campaign_id": self._storage_campaign_id(campaign_id),
                 "agent_id": self.settings.agent_id,
                 "comparison": comparison.model_dump(mode="json"),
                 "performance_score": comparison.performance_score,
@@ -130,10 +130,6 @@ class SupabaseRepository:
         )
         return [row["performance_score"] for row in response.data or []]
 
-    # ------------------------------------------------------------------
-    # PATTERNS
-    # ------------------------------------------------------------------
-
     def save_pattern_report(
         self,
         campaign_id: str,
@@ -149,18 +145,19 @@ class SupabaseRepository:
         if not findings:
             return
 
+        storage_campaign_id = self._storage_campaign_id(campaign_id)
         seen: set[tuple[str, str, str]] = set()
         rows: list[dict[str, Any]] = []
 
         for finding in findings:
-            key = (campaign_id, finding.category, finding.signal_key)
+            key = (storage_campaign_id, finding.category, finding.signal_key)
             if key in seen:
                 continue
             seen.add(key)
 
             rows.append(
                 {
-                    "campaign_id": campaign_id,
+                    "campaign_id": storage_campaign_id,
                     "agent_id": self.settings.agent_id,
                     "category": finding.category,
                     "signal_key": finding.signal_key,
@@ -188,7 +185,7 @@ class SupabaseRepository:
         return [
             PatternRecord(
                 id=row["id"],
-                campaign_id=row["campaign_id"],
+                campaign_id=self._public_campaign_id(row["campaign_id"]),
                 category=row["category"],
                 signal_key=row["signal_key"],
                 summary=row["summary"],
@@ -198,15 +195,12 @@ class SupabaseRepository:
             for row in response.data or []
         ]
 
-    # ------------------------------------------------------------------
-    # INSIGHTS
-    # ------------------------------------------------------------------
-
     def save_insights(
         self,
         campaign_id: str,
         insights: InsightExtractionOutput,
     ) -> None:
+        storage_campaign_id = self._storage_campaign_id(campaign_id)
         rows: list[dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
 
@@ -215,13 +209,13 @@ class SupabaseRepository:
             if content.lower() in ("string", "unknown", "none", ""):
                 continue
 
-            key = (campaign_id, "key_learning", content)
+            key = (storage_campaign_id, "key_learning", content)
             if key in seen:
                 continue
             seen.add(key)
 
             rows.append({
-                "campaign_id": campaign_id,
+                "campaign_id": storage_campaign_id,
                 "agent_id": self.settings.agent_id,
                 "kind": "key_learning",
                 "content": content,
@@ -233,13 +227,13 @@ class SupabaseRepository:
             if content.lower() in ("string", "unknown", "none", ""):
                 continue
 
-            key = (campaign_id, "recommendation", content)
+            key = (storage_campaign_id, "recommendation", content)
             if key in seen:
                 continue
             seen.add(key)
 
             rows.append({
-                "campaign_id": campaign_id,
+                "campaign_id": storage_campaign_id,
                 "agent_id": self.settings.agent_id,
                 "kind": "recommendation",
                 "content": content,
@@ -251,13 +245,13 @@ class SupabaseRepository:
             if content.lower() in ("string", "unknown", "none", ""):
                 continue
 
-            key = (campaign_id, "anomaly", content)
+            key = (storage_campaign_id, "anomaly", content)
             if key in seen:
                 continue
             seen.add(key)
 
             rows.append({
-                "campaign_id": campaign_id,
+                "campaign_id": storage_campaign_id,
                 "agent_id": self.settings.agent_id,
                 "kind": "anomaly",
                 "content": content,
@@ -282,7 +276,7 @@ class SupabaseRepository:
         return [
             InsightRecord(
                 id=row["id"],
-                campaign_id=row["campaign_id"],
+                campaign_id=self._public_campaign_id(row["campaign_id"]),
                 kind=row["kind"],
                 content=row["content"],
                 priority=row["priority"],
@@ -291,9 +285,6 @@ class SupabaseRepository:
             for row in response.data or []
         ]
 
-    # ------------------------------------------------------------------
-    # SIGNAL WEIGHTS
-    # ------------------------------------------------------------------
     def _is_valid_signal(self, signal: str | None) -> bool:
         if not signal:
             return False
@@ -302,12 +293,12 @@ class SupabaseRepository:
 
         if any(x in s for x in ("string", "unknown", "none", "")):
             return False
-        
+
         if s in ("string", "unknown", "none", ""):
             return False
 
         return True
-    
+
     def fetch_signal_weights(self) -> dict[str, FeedbackSignal]:
         response = (
             self._db.table("signal_weights")
@@ -315,7 +306,7 @@ class SupabaseRepository:
             .eq("agent_id", self.settings.agent_id)
             .execute()
         )
-        
+
         cleaned = {}
 
         for row in response.data or []:
@@ -351,16 +342,12 @@ class SupabaseRepository:
                 "failures": s.failures,
                 "last_updated": s.last_updated.isoformat(),
             })
-         # ✅ CRITICAL FIX
+
         if not rows:
             return
         self._db.table("signal_weights").upsert(
             rows, on_conflict="agent_id,signal_key"
         ).execute()
-
-    # ------------------------------------------------------------------
-    # HELPERS
-    # ------------------------------------------------------------------
 
     def current_timestamp(self) -> datetime:
         return datetime.now(timezone.utc)

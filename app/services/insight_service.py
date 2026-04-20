@@ -52,6 +52,39 @@ class InsightService:
             comparison_data=comparison_data,
             similar_campaigns=similar_campaigns,
         )
+
+    def generate_chat_reply(
+        self,
+        *,
+        message: str,
+        context: dict | None = None,
+    ) -> tuple[str, str]:
+        context_block = self._build_chat_context_block(context or {})
+        if self._client is not None:
+            try:
+                response = self._client.chat.completions.create(
+                    model=self.settings.insights_model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are Marko AI, a Campaign Intelligence / Reflection Agent. "
+                                "Help with campaign analysis, performance shifts, patterns, insights, "
+                                "memory, and practical next actions. Stay concise and specific."
+                            ),
+                        },
+                        {"role": "system", "content": f"Campaign context:\n{context_block}"},
+                        {"role": "user", "content": message},
+                    ],
+                )
+                reply = response.choices[0].message.content.strip()
+                if reply:
+                    return reply, self.settings.insights_model
+            except Exception:
+                pass
+
+        return self._fallback_chat_reply(message, context or {}), "local-fallback"
+
     def _clean(self, val: str | None) -> str | None:
         if not val:
             return None
@@ -59,6 +92,57 @@ class InsightService:
         if v in ("string", "unknown", "none", ""):
             return None
         return v
+
+    def _build_chat_context_block(self, context: dict) -> str:
+        parts: list[str] = []
+        if context.get("agentTitle"):
+            parts.append(f"Active agent: {context['agentTitle']}")
+        if context.get("narrative"):
+            parts.append(f"Narrative summary: {context['narrative']}")
+        if context.get("keyLearnings"):
+            parts.append(f"Key learnings: {' | '.join(context['keyLearnings'])}")
+        if context.get("recommendations"):
+            parts.append(f"Recommendations: {' | '.join(context['recommendations'])}")
+        if context.get("patterns"):
+            parts.append(f"Patterns: {' | '.join(context['patterns'])}")
+        if context.get("comparison"):
+            parts.append(f"Performance deltas: {' | '.join(context['comparison'])}")
+        if context.get("memory"):
+            parts.append(f"Memory: {' | '.join(context['memory'])}")
+        return "\n".join(parts) or "No campaign context available."
+
+    def _fallback_chat_reply(self, message: str, context: dict) -> str:
+        prompt = message.lower()
+        recommendations = context.get("recommendations") or []
+        patterns = context.get("patterns") or []
+        memory = context.get("memory") or []
+        narrative = context.get("narrative") or ""
+
+        if "biggest" in prompt or "issue" in prompt or "problem" in prompt:
+            return (
+                f"Biggest issue in focus: {recommendations[0]}"
+                if recommendations
+                else "I need an analyzed campaign to isolate the biggest issue clearly."
+            )
+        if "pattern" in prompt:
+            return (
+                f"Top pattern signals: {', '.join(patterns[:3])}."
+                if patterns
+                else "No strong pattern signals are available yet."
+            )
+        if "recommend" in prompt or "optimize" in prompt:
+            return (
+                f"Recommended next move: {recommendations[0]}"
+                if recommendations
+                else "No recommendation is available yet. Run an analysis first."
+            )
+        if "memory" in prompt or "similar" in prompt:
+            return (
+                f"Closest recalled campaigns: {', '.join(memory[:2])}."
+                if memory
+                else "No similar campaign memory is available yet."
+            )
+        return narrative or "Share a campaign result or ask about analysis, patterns, insights, memory, or next actions."
 
     def generate_recommendations(
         self,
