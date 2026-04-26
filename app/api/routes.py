@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
 
 from app.core.bootstrap import get_engine, get_settings
@@ -46,7 +48,11 @@ def analyze_campaign(
     background_tasks: BackgroundTasks,
     engine: ReflectionLearningEngine = Depends(get_engine),
 ) -> AnalyzeCampaignResponse:
-    result = engine.analyze_campaign(payload, background_tasks=background_tasks)
+    result = engine.analyze_campaign(
+        payload,
+        background_tasks=background_tasks,
+        request_id=str(uuid4()),
+    )
     return clean_text(result)
 
 
@@ -94,12 +100,13 @@ def get_patterns(
 def get_recommendations(
     platform: str | None = Query(default=None),
     objective: str | None = Query(default=None),
+    include_similar_campaigns: bool = Query(default=True),
     engine: ReflectionLearningEngine = Depends(get_engine),
 ) -> RecommendationResponse:
     result = engine.get_recommendations(
         platform=platform,
         objective=objective,
-        include_similar_campaigns=False,
+        include_similar_campaigns=include_similar_campaigns,
     )
     return clean_text(result)
 
