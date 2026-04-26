@@ -40,10 +40,12 @@ class ReflectionLearningEngine:
         payload: CampaignPerformanceInput,
         *,
         background_tasks: BackgroundTasks | None = None,
+        request_id: str | None = None,
     ) -> AnalyzeCampaignResponse:
         return self.supervisor_agent.analyze_campaign(
             payload,
             background_tasks=background_tasks,
+            request_id=request_id,
         )
 
     def get_top_insights(self, limit: int | None = None):
