@@ -29,6 +29,7 @@ from app.models.schemas import (
     WeightSnapshot,
 )
 from app.orchestration.async_orchestrator import AsyncOrchestrator
+from app.orchestration.recommendation_validation import validate_recommendation_output
 from app.orchestration.reflection_wrapper import ReflectionWrapper
 from app.services.feedback import FeedbackLoopEngine
 from app.utils.io import write_json
@@ -62,6 +63,7 @@ class SupervisorAgent:
             summary_text,
             similar_campaigns,
             insights,
+            validated_recommendations,
             vector_saved,
             weights,
         ) = asyncio.run(
@@ -71,12 +73,14 @@ class SupervisorAgent:
                 request_id=request_id,
             )
         )
-        output_path = (
-            self._persist_outputs(payload.campaign_id, comparison, pattern_report, insights, weights)
-            if self.settings.enable_local_output
-            else None
+        output_path = self._expected_output_path(payload.campaign_id)
+        reflection = self._evaluate_reflection(
+            comparison,
+            pattern_report,
+            insights,
+            validated_recommendations,
+            request_id=request_id,
         )
-        reflection = self._evaluate_reflection(comparison, pattern_report, insights, request_id=request_id)
         if request_id:
             logger.info("analyze_campaign_completed request_id=%s campaign_id=%s", request_id, payload.campaign_id)
 
@@ -136,44 +140,47 @@ class SupervisorAgent:
                 ),
             }
         )
-        summary_text, similar_campaigns, insights = self._validated_result_or_default(
+        raw_insight_result = self._validated_result_or_default(
             insight_results,
             "insight_agent",
             self._validate_insight_result,
             self._fallback_insight_result(payload, comparison, pattern_report),
         )
-
-        trailing_results = await orchestrator.run_many(
-            {
-                "memory_agent": lambda: self.memory_agent.persist(
-                    payload,
-                    comparison,
-                    pattern_report,
-                    insights,
-                    summary_text=summary_text,
-                    background_tasks=background_tasks,
-                ),
-                "feedback_engine": lambda: self.feedback_engine.update_system_learnings(
-                    payload,
-                    comparison,
-                    pattern_report,
-                ),
-            }
+        summary_text, similar_campaigns, insights = raw_insight_result
+        validated_recommendations = self._collect_valid_recommendations(
+            raw_insight_result,
+            agent_name="insight_agent",
+            request_id=request_id,
         )
-        vector_saved = self._validated_result_or_default(
-            trailing_results,
-            "memory_agent",
-            lambda value: bool(value),
-            False,
-        )
-        weights = self._validated_result_or_default(
-            trailing_results,
-            "feedback_engine",
-            lambda value: WeightSnapshot.model_validate(value),
-            self._fallback_weights(),
+        validated_recommendations = self._apply_recommendation_caps(
+            validated_recommendations,
+            agent_name="insight_agent",
+            request_id=request_id,
         )
 
-        return comparison, pattern_report, summary_text, similar_campaigns, insights, vector_saved, weights
+        vector_saved = False
+        weights = WeightSnapshot.model_validate(self.feedback_engine.get_current_snapshot())
+        await self._schedule_background_followups(
+            payload,
+            comparison,
+            pattern_report,
+            insights,
+            weights,
+            summary_text=summary_text,
+            background_tasks=background_tasks,
+            request_id=request_id,
+        )
+
+        return (
+            comparison,
+            pattern_report,
+            summary_text,
+            similar_campaigns,
+            insights,
+            validated_recommendations,
+            vector_saved,
+            weights,
+        )
 
     def _validated_result_or_default(
         self,
@@ -227,6 +234,39 @@ class SupervisorAgent:
         ]
         validated_insights = InsightExtractionOutput.model_validate(insights)
         return summary_text, validated_similar_campaigns, validated_insights
+
+    def _collect_valid_recommendations(
+        self,
+        insight_result: tuple[str, list[SemanticSearchResult], InsightExtractionOutput],
+        *,
+        agent_name: str,
+        request_id: str | None,
+    ) -> list[dict[str, Any]]:
+        _, _, insights = insight_result
+        return validate_recommendation_output(
+            list(insights.recommendations),
+            agent_name=agent_name,
+            request_id=request_id,
+        )
+
+    def _apply_recommendation_caps(
+        self,
+        recommendations: list[dict[str, Any]],
+        *,
+        agent_name: str,
+        request_id: str | None,
+    ) -> list[dict[str, Any]]:
+        capped = recommendations[:20]
+        capped = capped[:100]
+        if len(capped) != len(recommendations):
+            logger.info(
+                "recommendation_caps_applied request_id=%s agent=%s original_count=%s capped_count=%s",
+                request_id,
+                agent_name,
+                len(recommendations),
+                len(capped),
+            )
+        return capped
 
     def _fallback_comparison(self, payload: CampaignPerformanceInput) -> ComparisonReport:
         return ComparisonReport(
@@ -285,17 +325,167 @@ class SupervisorAgent:
         comparison: ComparisonReport,
         pattern_report: PatternReport,
         insights: InsightExtractionOutput,
+        recommendations: list[dict[str, Any]],
         *,
         request_id: str | None,
     ) -> ReflectionEvaluation:
-        reflection = self.reflection_wrapper.safe_evaluate(comparison, pattern_report, insights)
+        reflection = self.reflection_wrapper.safe_evaluate(
+            comparison,
+            pattern_report,
+            insights,
+            recommendations=recommendations,
+        )
         logger.info(
-            "reflection_evaluated request_id=%s evaluation_score=%s scoring_version=%s",
+            "reflection_evaluated request_id=%s evaluation_score=%s scoring_version=%s validated_recommendations=%s",
             request_id,
             reflection.evaluation_score,
             reflection.scoring_version,
+            len(recommendations),
         )
         return reflection
+
+    async def _schedule_background_followups(
+        self,
+        payload: CampaignPerformanceInput,
+        comparison: ComparisonReport,
+        pattern_report: PatternReport,
+        insights: InsightExtractionOutput,
+        weights: WeightSnapshot,
+        *,
+        summary_text: str,
+        background_tasks: BackgroundTasks | None,
+        request_id: str | None,
+    ) -> None:
+        if background_tasks is None:
+            asyncio.create_task(
+                asyncio.to_thread(
+                    self._run_background_memory,
+                    payload,
+                    comparison,
+                    pattern_report,
+                    insights,
+                    summary_text,
+                    request_id,
+                )
+            )
+            asyncio.create_task(
+                asyncio.to_thread(
+                    self._run_background_feedback,
+                    payload,
+                    comparison,
+                    pattern_report,
+                    request_id,
+                )
+            )
+            if self.settings.enable_local_output:
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        self._run_background_output_persistence,
+                        payload.campaign_id,
+                        comparison,
+                        pattern_report,
+                        insights,
+                        weights,
+                        request_id,
+                    )
+                )
+            await asyncio.sleep(0)
+            return
+
+        background_tasks.add_task(
+            self._run_background_memory,
+            payload,
+            comparison,
+            pattern_report,
+            insights,
+            summary_text,
+            request_id,
+        )
+        background_tasks.add_task(
+            self._run_background_feedback,
+            payload,
+            comparison,
+            pattern_report,
+            request_id,
+        )
+        if self.settings.enable_local_output:
+            background_tasks.add_task(
+                self._run_background_output_persistence,
+                payload.campaign_id,
+                comparison,
+                pattern_report,
+                insights,
+                weights,
+                request_id,
+            )
+        return
+
+    def _expected_output_path(self, campaign_id: str):
+        if not self.settings.enable_local_output:
+            return None
+        return self.settings.output_dir / campaign_id
+
+    def _run_background_memory(
+        self,
+        payload: CampaignPerformanceInput,
+        comparison: ComparisonReport,
+        pattern_report: PatternReport,
+        insights: InsightExtractionOutput,
+        summary_text: str,
+        request_id: str | None,
+    ) -> None:
+        try:
+            self.memory_agent.persist(
+                payload,
+                comparison,
+                pattern_report,
+                insights,
+                summary_text=summary_text,
+                background_tasks=None,
+            )
+        except Exception as exc:
+            logger.warning(
+                "background_memory_failed request_id=%s campaign_id=%s error=%s",
+                request_id,
+                payload.campaign_id,
+                exc,
+            )
+
+    def _run_background_feedback(
+        self,
+        payload: CampaignPerformanceInput,
+        comparison: ComparisonReport,
+        pattern_report: PatternReport,
+        request_id: str | None,
+    ) -> None:
+        try:
+            self.feedback_engine.update_system_learnings(payload, comparison, pattern_report)
+        except Exception as exc:
+            logger.warning(
+                "background_feedback_failed request_id=%s campaign_id=%s error=%s",
+                request_id,
+                payload.campaign_id,
+                exc,
+            )
+
+    def _run_background_output_persistence(
+        self,
+        campaign_id: str,
+        comparison: ComparisonReport,
+        pattern_report: PatternReport,
+        insights: InsightExtractionOutput,
+        weights: WeightSnapshot,
+        request_id: str | None,
+    ) -> None:
+        try:
+            self._persist_outputs(campaign_id, comparison, pattern_report, insights, weights)
+        except Exception as exc:
+            logger.warning(
+                "background_output_persistence_failed request_id=%s campaign_id=%s error=%s",
+                request_id,
+                campaign_id,
+                exc,
+            )
 
     def _persist_outputs(
         self,
