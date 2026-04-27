@@ -11,7 +11,10 @@ from app.models.schemas import (
     AgentChatResponse,
     AnalyzeCampaignResponse,
     CampaignPerformanceInput,
+    FeedbackActionResponse,
     RecommendationResponse,
+    RecommendationFeedbackRequest,
+    RecommendationShownRequest,
 )
 from app.services.comparator import PerformanceComparator
 from app.services.feedback import FeedbackLoopEngine
@@ -90,3 +93,33 @@ class ReflectionLearningEngine:
             platform=platform,
             objective=objective,
         )
+
+    def mark_recommendation_shown(
+        self,
+        payload: RecommendationShownRequest,
+        *,
+        request_id: str | None = None,
+    ) -> FeedbackActionResponse:
+        self.repository.record_recommendation_shown(
+            recommendation_id=payload.recommendation_id,
+            campaign_id=payload.campaign_id,
+            recommendation_type=payload.recommendation_type,
+            platform=payload.platform,
+            request_id=request_id,
+        )
+        return FeedbackActionResponse(status="shown_recorded", recommendation_id=payload.recommendation_id)
+
+    def submit_recommendation_feedback(
+        self,
+        payload: RecommendationFeedbackRequest,
+        *,
+        request_id: str | None = None,
+    ) -> FeedbackActionResponse:
+        recorded = self.repository.record_recommendation_feedback(
+            recommendation_id=payload.recommendation_id,
+            accepted=payload.accepted,
+            request_id=request_id,
+        )
+        if not recorded:
+            raise ValueError("recommendation must be shown before feedback")
+        return FeedbackActionResponse(status="feedback_recorded", recommendation_id=payload.recommendation_id)

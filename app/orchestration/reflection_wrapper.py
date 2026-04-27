@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from app.models.schemas import ComparisonReport, InsightExtractionOutput, PatternReport, ReflectionEvaluation
 
@@ -12,6 +13,7 @@ class ReflectionWrapper:
         comparison: ComparisonReport,
         pattern_report: PatternReport,
         insights: InsightExtractionOutput,
+        recommendations: list[dict[str, Any]] | None = None,
     ) -> ReflectionEvaluation:
         score = 0.0
         reasons: list[str] = []
@@ -31,6 +33,10 @@ class ReflectionWrapper:
         if insights.recommendations:
             score += 0.2
             reasons.append("recommendations generated")
+
+        if recommendations:
+            score += 0.1
+            reasons.append("validated recommendation payload available")
 
         if insights.anomalies:
             score += 0.1
@@ -55,9 +61,10 @@ class ReflectionWrapper:
         comparison: ComparisonReport,
         pattern_report: PatternReport,
         insights: InsightExtractionOutput,
+        recommendations: list[dict[str, Any]] | None = None,
     ) -> ReflectionEvaluation:
         try:
-            return self.evaluate(comparison, pattern_report, insights)
+            return self.evaluate(comparison, pattern_report, insights, recommendations=recommendations)
         except Exception:
             return ReflectionEvaluation(
                 evaluation_score=0.5,
