@@ -102,7 +102,7 @@ function BrandMark() {
   )
 }
 
-export default function AppHeader() {
+export default function AppHeader({ debugMode = false, onDebugModeChange = null }) {
   return (
     <header
       data-intro-reveal="navbar"
@@ -155,7 +155,25 @@ export default function AppHeader() {
 
       <div style={{ flex: 1 }} />
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 128 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", minWidth: 128, gap: 12 }}>
+        <label
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 12,
+            color: 'rgba(255,255,255,0.72)',
+            userSelect: 'none',
+          }}
+        >
+          <span>Debug Mode</span>
+          <input
+            type="checkbox"
+            checked={debugMode}
+            onChange={e => onDebugModeChange?.(e.target.checked)}
+            style={{ accentColor: '#111111' }}
+          />
+        </label>
         <StatusBadge />
       </div>
     </header>

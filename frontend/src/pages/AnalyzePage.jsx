@@ -7,7 +7,7 @@ import { ErrorBox } from '../components/ui'
 import AgentChatPanel from '../components/AgentChatPanel'
 import StepLoader from '../components/StepLoader'
 import { clearViewState, loadViewState, persistViewState } from '../lib/viewState'
-import { analyzeCampaign } from '../api/api'
+import { analyzeCampaign, markRecommendationShown, submitRecommendationFeedback } from '../api/api'
 
 function Placeholder() {
   return (
@@ -42,7 +42,131 @@ function Placeholder() {
 const ANALYZE_STATE_KEY = 'marko-analyze-page-state'
 const initialViewState = loadViewState(ANALYZE_STATE_KEY, {}) || {}
 
-export default function AnalyzePage() {
+function buildAgentHealth(result) {
+  if (!result) return []
+
+  const comparisonFallback = result.comparison_report?.summary?.includes('Analysis temporarily unavailable.')
+  const patternFallback = result.pattern_report?.pattern_report?.includes('Pattern detection temporarily unavailable.')
+  const insightFallback = result.insights?.source === 'deterministic'
+  const reflectionFallback = result.reflection?.evaluation_score === 0.5 && result.reflection?.reason === 'evaluation unavailable'
+
+  return [
+    {
+      agent_name: 'analysis_agent',
+      status: comparisonFallback ? 'fallback' : 'success',
+      schema_valid: Boolean(result.comparison_report),
+      cleanliness_score: comparisonFallback ? 1 : 3,
+      missing_fields: comparisonFallback ? ['comparison_report.summary'] : [],
+      fallback_used: comparisonFallback,
+      latency_ms: null,
+    },
+    {
+      agent_name: 'pattern_agent',
+      status: patternFallback ? 'fallback' : 'success',
+      schema_valid: Boolean(result.pattern_report),
+      cleanliness_score: patternFallback ? 1 : 3,
+      missing_fields: patternFallback ? ['pattern_report.findings'] : [],
+      fallback_used: patternFallback,
+      latency_ms: null,
+    },
+    {
+      agent_name: 'insight_agent',
+      status: insightFallback ? 'fallback' : 'success',
+      schema_valid: Boolean(result.insights),
+      cleanliness_score: result.insights?.recommendations?.length ? 3 : 1,
+      missing_fields: result.insights?.recommendations?.length ? [] : ['insights.recommendations'],
+      fallback_used: insightFallback,
+      latency_ms: null,
+    },
+    {
+      agent_name: 'memory_agent',
+      status: result.stored_memory?.vector_saved ? 'success' : 'fallback',
+      schema_valid: Boolean(result.stored_memory),
+      cleanliness_score: result.stored_memory?.vector_saved ? 3 : 1,
+      missing_fields: result.stored_memory?.vector_saved ? [] : ['stored_memory.vector_saved'],
+      fallback_used: !result.stored_memory?.vector_saved,
+      latency_ms: null,
+    },
+    {
+      agent_name: 'reflection',
+      status: reflectionFallback ? 'fallback' : 'success',
+      schema_valid: Boolean(result.reflection),
+      cleanliness_score: reflectionFallback ? 1 : 3,
+      missing_fields: reflectionFallback ? ['reflection.reason'] : [],
+      fallback_used: reflectionFallback,
+      latency_ms: null,
+    },
+  ]
+}
+
+function DebugBlock({ title, children }) {
+  return (
+    <div className="workspace-main-card" style={{ padding: 16 }}>
+      <div className="workspace-section-label" style={{ marginBottom: 10 }}>{title}</div>
+      {children}
+    </div>
+  )
+}
+
+function DebugPre({ value }) {
+  return (
+    <pre className="debug-pre">
+      {typeof value === 'string' ? value : JSON.stringify(value, null, 2)}
+    </pre>
+  )
+}
+
+function DebugSection({ debugState, onMarkShown, onFeedback }) {
+  const { trace, database, pipelineSummary } = debugState
+
+  return (
+    <section className="workspace-main-card" style={{ padding: 16, marginTop: 16 }}>
+      <div className="workspace-section-label" style={{ marginBottom: 12 }}>Debug Mode</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <DebugBlock title="API TRACE">
+          <DebugPre value={{
+            request_id: trace.request_id,
+            request_json: trace.request_json,
+            response_json: trace.response_json,
+            latency_ms: trace.latency_ms,
+            status: trace.status,
+          }} />
+        </DebugBlock>
+
+        <DebugBlock title="AGENT OUTPUT HEALTH">
+          <DebugPre value={trace.agent_health} />
+        </DebugBlock>
+
+        <DebugBlock title="RECOMMENDATION CHECK">
+          <DebugPre value={{
+            raw_recommendations: trace.raw_recommendations,
+            validated_recommendations: trace.validated_recommendations,
+            dropped_recommendations: trace.dropped_recommendations,
+          }} />
+        </DebugBlock>
+
+        <DebugBlock title="DATABASE STATUS">
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            <button type="button" className="btn-ghost" onClick={onMarkShown}>Trigger /shown</button>
+            <button type="button" className="btn-ghost" onClick={() => onFeedback(true)}>Trigger /feedback accept</button>
+            <button type="button" className="btn-ghost" onClick={() => onFeedback(false)}>Trigger /feedback reject</button>
+          </div>
+          <DebugPre value={{
+            shown_response: database.shown_response,
+            feedback_response: database.feedback_response,
+            stats_update_snapshot: database.stats_update_snapshot,
+          }} />
+        </DebugBlock>
+
+        <DebugBlock title="PIPELINE SUMMARY">
+          <DebugPre value={pipelineSummary} />
+        </DebugBlock>
+      </div>
+    </section>
+  )
+}
+
+export default function AnalyzePage({ debugMode = false }) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -51,6 +175,29 @@ export default function AnalyzePage() {
   const [rightTab, setRightTab] = useState(initialViewState.rightTab ?? 'chat')
   const [activeAgent, setActiveAgent] = useState(initialViewState.activeAgent ?? 'supervisor')
   const [formDraft, setFormDraft] = useState(null)
+  const [debugState, setDebugState] = useState({
+    trace: {
+      request_id: null,
+      request_json: null,
+      response_json: null,
+      latency_ms: null,
+      status: 'idle',
+      agent_health: [],
+      raw_recommendations: [],
+      validated_recommendations: [],
+      dropped_recommendations: [],
+    },
+    database: {
+      shown_response: null,
+      feedback_response: null,
+      stats_update_snapshot: null,
+    },
+    pipelineSummary: {
+      caps_applied: { per_agent: 20, total: 100 },
+      reflection_score: null,
+      fallback_reason: null,
+    },
+  })
 
   async function handleSubmit(payload) {
     setLoading(true)
@@ -58,7 +205,50 @@ export default function AnalyzePage() {
     setResult(null)
     setFormCollapsed(true)
     setFormDraft(payload)
+    const requestId = crypto?.randomUUID?.() || `debug-${Date.now()}`
     try {
+      const debugResponse = await analyzeCampaign(payload, { debug: debugMode })
+      if (debugMode) {
+        if (!debugResponse.ok) {
+          throw new Error(debugResponse.error || 'Unexpected error. Please try again.')
+        }
+        const data = debugResponse.body
+        setResult(data)
+        const rawRecommendations = data?.insights?.recommendations || []
+        const validatedRecommendations = rawRecommendations.filter(item => {
+          const value = String(item || '').trim().toLowerCase()
+          return value && !['string', 'unknown', 'none'].includes(value)
+        }).slice(0, 20)
+        setDebugState({
+          trace: {
+            request_id: requestId,
+            request_json: payload,
+            response_json: data,
+            latency_ms: debugResponse.latency_ms,
+            status: debugResponse.status,
+            agent_health: buildAgentHealth(data),
+            raw_recommendations: rawRecommendations,
+            validated_recommendations: validatedRecommendations,
+            dropped_recommendations: rawRecommendations
+              .filter(item => !validatedRecommendations.includes(item))
+              .map(item => ({ value: item, reason: 'invalid_or_filtered_runtime_recommendation' })),
+          },
+          database: {
+            shown_response: null,
+            feedback_response: null,
+            stats_update_snapshot: null,
+          },
+          pipelineSummary: {
+            caps_applied: {
+              per_agent: Math.min(validatedRecommendations.length, 20),
+              total: Math.min(validatedRecommendations.length, 100),
+            },
+            reflection_score: data?.reflection?.evaluation_score ?? null,
+            fallback_reason: data?.reflection?.reason || null,
+          },
+        })
+        return
+      }
       const data = await analyzeCampaign(payload)
       setResult(data)
     } catch (e) {
@@ -128,6 +318,65 @@ export default function AnalyzePage() {
     comparison: result?.comparison_report?.summary || [],
     memory: (result?.similar_campaigns || []).map(item => item.campaign_id || item.document_id),
   }), [currentAgent.title, result])
+
+  async function handleDebugShown() {
+    if (!debugMode || !result?.comparison_report?.campaign_id) return
+    const recommendation = (debugState.trace.validated_recommendations[0] || debugState.trace.raw_recommendations[0] || 'debug-recommendation')
+    const shownPayload = {
+      recommendation_id: `${result.comparison_report.campaign_id}-debug-rec-1`,
+      campaign_id: result.comparison_report.campaign_id,
+      recommendation_type: 'recommendation',
+      platform: formDraft?.platform || 'unknown',
+    }
+    try {
+      const response = await markRecommendationShown(shownPayload, { debug: true })
+      setDebugState(prev => ({
+        ...prev,
+        database: {
+          ...prev.database,
+          shown_response: response,
+          stats_update_snapshot: {
+            recommendation_id: shownPayload.recommendation_id,
+            last_action: 'shown',
+            recommendation_preview: recommendation,
+          },
+        },
+      }))
+    } catch (e) {
+      setDebugState(prev => ({
+        ...prev,
+        database: { ...prev.database, shown_response: { error: e.message || 'Shown request failed' } },
+      }))
+    }
+  }
+
+  async function handleDebugFeedback(accepted) {
+    if (!debugMode || !result?.comparison_report?.campaign_id) return
+    const payload = {
+      recommendation_id: `${result.comparison_report.campaign_id}-debug-rec-1`,
+      accepted,
+    }
+    try {
+      const response = await submitRecommendationFeedback(payload, { debug: true })
+      setDebugState(prev => ({
+        ...prev,
+        database: {
+          ...prev.database,
+          feedback_response: response,
+          stats_update_snapshot: {
+            recommendation_id: payload.recommendation_id,
+            last_action: accepted ? 'accepted' : 'rejected',
+            accepted,
+          },
+        },
+      }))
+    } catch (e) {
+      setDebugState(prev => ({
+        ...prev,
+        database: { ...prev.database, feedback_response: { error: e.message || 'Feedback request failed' } },
+      }))
+    }
+  }
 
   function renderAgentResultView() {
     if (loading) return <StepLoader />
@@ -257,6 +506,13 @@ export default function AnalyzePage() {
           )}
 
           <section className="workspace-results-area">{renderAgentResultView()}</section>
+          {debugMode && (
+            <DebugSection
+              debugState={debugState}
+              onMarkShown={handleDebugShown}
+              onFeedback={handleDebugFeedback}
+            />
+          )}
         </div>
       }
       rightTab={rightTab}

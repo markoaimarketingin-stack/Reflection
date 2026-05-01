@@ -137,6 +137,20 @@ html, body {
 }
 .btn-ghost:hover { border-color: var(--border-light); color: var(--text-primary); background: rgba(255,255,255,0.7); transform: translateY(-1px); }
 
+.debug-pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .tag {
   display: inline-block;
   padding: 2px 8px;
