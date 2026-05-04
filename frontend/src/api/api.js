@@ -1,32 +1,57 @@
 const BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const API_AUTH_KEY = import.meta.env.VITE_API_AUTH_KEY
 
-async function request(path, options = {}) {
+async function request(path, options = {}, debug = false) {
   const headers = {
     'Content-Type': 'application/json',
     ...(API_AUTH_KEY ? { 'X-API-Key': API_AUTH_KEY } : {}),
     ...(options.headers || {}),
   }
 
+  const startedAt = performance.now()
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers,
   })
+  const latency_ms = Math.round(performance.now() - startedAt)
   if (!res.ok) {
     let msg = `Server error (${res.status})`
+    let rawBody = null
     try {
       const body = await res.json()
+      rawBody = body
       msg = body?.detail || body?.message || JSON.stringify(body) || msg
     } catch {
-      try { msg = (await res.text()) || msg } catch { /* keep default */ }
+      try {
+        rawBody = await res.text()
+        msg = rawBody || msg
+      } catch { /* keep default */ }
+    }
+    if (debug) {
+      return {
+        ok: false,
+        status: res.status,
+        latency_ms,
+        error: msg,
+        body: rawBody,
+      }
     }
     throw new Error(msg)
   }
-  return res.json()
+  const body = await res.json()
+  if (debug) {
+    return {
+      ok: true,
+      status: res.status,
+      latency_ms,
+      body,
+    }
+  }
+  return body
 }
 
-export function analyzeCampaign(payload) {
-  return request('/analyze-campaign', { method: 'POST', body: JSON.stringify(payload) })
+export function analyzeCampaign(payload, options = {}) {
+  return request('/analyze-campaign', { method: 'POST', body: JSON.stringify(payload) }, options.debug === true)
 }
 
 export function sendAgentChat(message, context = {}) {
@@ -54,4 +79,12 @@ export function getRecommendations(platform, objective) {
 
 export function getHealth() {
   return request('/health')
+}
+
+export function markRecommendationShown(payload, options = {}) {
+  return request('/shown', { method: 'POST', body: JSON.stringify(payload) }, options.debug === true)
+}
+
+export function submitRecommendationFeedback(payload, options = {}) {
+  return request('/feedback', { method: 'POST', body: JSON.stringify(payload) }, options.debug === true)
 }
